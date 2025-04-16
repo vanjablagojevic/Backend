@@ -5,6 +5,8 @@ using Backend.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -72,6 +74,31 @@ namespace Backend.Controllers
         public async Task<IActionResult> UpdateUser(int id, UserCreateUpdateDto dto)
         {
             var user = await _context.Users.FindAsync(id);
+            var previousVersion = new UserVersion
+            {
+                UserId = user.Id,
+                Email = user.Email,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                Adress = user.Address,
+                DateOfBirth = user.DateOfBirth,
+                Role = user.Role,
+                ChangedAt = DateTime.UtcNow,
+                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value
+            };
+
+            _context.UserVersions.Add(previousVersion);
+
+            var log = new AuditLog
+            {
+                TableName = "User",
+                Action = "UPDATE",
+                ChangedBy = User.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                ChangedAt = DateTime.UtcNow,
+                Data = JsonConvert.SerializeObject(user)
+            };
+            _context.AuditLogs.Add(log);
+
             if (user == null) return NotFound();
 
             if (user.Email != dto.Email && await _context.Users.AnyAsync(u => u.Email == dto.Email))
@@ -104,6 +131,64 @@ namespace Backend.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        [HttpGet("user-history/{userId}")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> GetUserHistory(int userId)
+        {
+            var history = await _context.UserVersions
+                   .Where(u => u.UserId == userId)
+                .OrderByDescending(u => u.ChangedAt)
+                .ToListAsync();
+
+            return Ok(history);
+        }
+
+        [HttpPost("{userId}/revert/{versionId}")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> RevertUser(int userId, int versionId)
+        {
+            var user = await _context.Users.FindAsync(userId);
+            var version = await _context.UserVersions
+                .FirstOrDefaultAsync(v => v.UserId == userId && v.Id == versionId);
+
+            if (version == null)
+                return NotFound();
+
+            var newVersion = new UserVersion
+            {
+                UserId = version.UserId,
+                FirstName = version.FirstName,
+                LastName = version.LastName,
+                Adress = version.Adress,
+                DateOfBirth = version.DateOfBirth,
+                Role = version.Role,
+                Email = version.Email,
+                ChangedAt = DateTime.UtcNow,
+                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value
+            };
+
+            _context.UserVersions.Add(newVersion);
+
+            var log = new AuditLog
+            {
+                TableName = "User",
+                Action = "REVERT",
+                ChangedBy = User.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                ChangedAt = DateTime.UtcNow,
+                Data = JsonConvert.SerializeObject(version)
+            };
+            _context.AuditLogs.Add(log);
+
+            user.Email = version.Email;
+            user.FirstName = version.FirstName;
+            user.LastName = version.LastName;
+            user.Address = version.Adress;
+            user.DateOfBirth = version.DateOfBirth;
+
+            await _context.SaveChangesAsync();
+            return Ok();
         }
 
         // PATCH: api/users/5/status
@@ -151,6 +236,31 @@ namespace Backend.Controllers
 
             if (user == null)
                 return NotFound("Korisnik nije pronađen.");
+
+            var previousVersion = new UserVersion
+            {
+                UserId = user.Id,
+                Email = user.Email,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                Adress = user.Address,
+                DateOfBirth = user.DateOfBirth,
+                Role = user.Role,
+                ChangedAt = DateTime.UtcNow,
+                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value
+            };
+
+            _context.UserVersions.Add(previousVersion);
+
+            var log = new AuditLog
+            {
+                TableName = "User",
+                Action = "UPDATE",
+                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value,
+                ChangedAt = DateTime.UtcNow,
+                Data = JsonConvert.SerializeObject(user)
+            };
+            _context.AuditLogs.Add(log);
 
             user.Email = dto.Email;
             user.FirstName = dto.FirstName;
@@ -200,6 +310,17 @@ namespace Backend.Controllers
             return Ok("Lozinka je uspješno promijenjena.");
 
 
+        }
+
+        [HttpGet("audit-logs")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> GetAuditLogs()
+        {
+            var logs = await _context.AuditLogs
+                .OrderByDescending(log => log.ChangedAt)
+                .ToListAsync();
+
+            return Ok(logs);
         }
     }
 }

@@ -33,11 +33,16 @@ namespace Backend.Controllers
 
             CreatePasswordHash(dto.Password, out byte[] passwordHash, out byte[] passwordSalt);
 
+            var isFirstUser = !await _context.Users.AnyAsync();
+            var role = isFirstUser ? "Admin" : "User";
+
             var user = new User
             {
                 Email = dto.Email,
                 PasswordHash = passwordHash,
-                PasswordSalt = passwordSalt
+                PasswordSalt = passwordSalt,
+                Role = role,
+                IsActive = true
             };
 
             _context.Users.Add(user);
@@ -52,6 +57,10 @@ namespace Backend.Controllers
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == dto.Email);
             if (user == null)
                 return Unauthorized("Nevažeći kredencijali");
+
+            //Provjera za aktivan/neaktivan profil
+            if (!user.IsActive)
+                return BadRequest("Vaš profil je neaktivan. Obratite se administratoru.");
 
             // Provjeri da li je korisnik zaključan
             if (user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTime.UtcNow)

@@ -74,6 +74,9 @@ namespace Backend.Controllers
         public async Task<IActionResult> UpdateUser(int id, UserCreateUpdateDto dto)
         {
             var user = await _context.Users.FindAsync(id);
+
+            if (user == null) return NotFound();
+
             var previousVersion = new UserVersion
             {
                 UserId = user.Id,
@@ -83,6 +86,7 @@ namespace Backend.Controllers
                 Adress = user.Address,
                 DateOfBirth = user.DateOfBirth,
                 Role = user.Role,
+                IsActive=user.IsActive,
                 ChangedAt = DateTime.UtcNow,
                 ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value
             };
@@ -93,13 +97,11 @@ namespace Backend.Controllers
             {
                 TableName = "User",
                 Action = "UPDATE",
-                ChangedBy = User.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value,
                 ChangedAt = DateTime.UtcNow,
                 Data = JsonConvert.SerializeObject(user)
             };
             _context.AuditLogs.Add(log);
-
-            if (user == null) return NotFound();
 
             if (user.Email != dto.Email && await _context.Users.AnyAsync(u => u.Email == dto.Email))
                 return BadRequest("Email već postoji.");
@@ -125,7 +127,18 @@ namespace Backend.Controllers
         public async Task<IActionResult> DeleteUser(int id)
         {
             var user = await _context.Users.FindAsync(id);
+
             if (user == null) return NotFound();
+
+            var log = new AuditLog
+            {
+                TableName = "User",
+                Action = "DELETE",
+                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value,
+                ChangedAt = DateTime.UtcNow,
+                Data = JsonConvert.SerializeObject(user)
+            };
+            _context.AuditLogs.Add(log);
 
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
@@ -150,6 +163,8 @@ namespace Backend.Controllers
         public async Task<IActionResult> RevertUser(int userId, int versionId)
         {
             var user = await _context.Users.FindAsync(userId);
+            if (user == null) return NotFound();
+
             var version = await _context.UserVersions
                 .FirstOrDefaultAsync(v => v.UserId == userId && v.Id == versionId);
 
@@ -175,7 +190,7 @@ namespace Backend.Controllers
             {
                 TableName = "User",
                 Action = "REVERT",
-                ChangedBy = User.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value,
                 ChangedAt = DateTime.UtcNow,
                 Data = JsonConvert.SerializeObject(version)
             };
@@ -185,6 +200,7 @@ namespace Backend.Controllers
             user.FirstName = version.FirstName;
             user.LastName = version.LastName;
             user.Address = version.Adress;
+            user.Role=version.Role;
             user.DateOfBirth = version.DateOfBirth;
 
             await _context.SaveChangesAsync();
@@ -237,6 +253,9 @@ namespace Backend.Controllers
             if (user == null)
                 return NotFound("Korisnik nije pronađen.");
 
+            if (user.Email != dto.Email && await _context.Users.AnyAsync(u => u.Email == dto.Email))
+                return BadRequest("Email već postoji.");
+
             var previousVersion = new UserVersion
             {
                 UserId = user.Id,
@@ -261,6 +280,7 @@ namespace Backend.Controllers
                 Data = JsonConvert.SerializeObject(user)
             };
             _context.AuditLogs.Add(log);
+
 
             user.Email = dto.Email;
             user.FirstName = dto.FirstName;

@@ -6,7 +6,6 @@ public class UserCreateUpdateDto
     [EmailAddress(ErrorMessage = "Email nije validan.")]
     public string Email { get; set; }
 
-    [MinLength(6, ErrorMessage = "Lozinka mora imati barem 6 karaktera.")]
     public string? Password { get; set; } // Može biti opcionalna kod izmjene
 
     [Required(ErrorMessage = "Uloga je obavezna.")]

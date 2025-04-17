@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using Newtonsoft.Json;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -46,6 +47,16 @@ namespace Backend.Controllers
             };
 
             _context.Users.Add(user);
+
+            var log = new AuditLog
+            {
+                TableName = "User",
+                Action = "REGISTER",
+                ChangedBy = user.Email,
+                ChangedAt = DateTime.Now,
+                Data = JsonConvert.SerializeObject(user)
+            };
+            _context.AuditLogs.Add(log);
             await _context.SaveChangesAsync();
 
             return Ok("Korisnik je registrovan.");

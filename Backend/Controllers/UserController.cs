@@ -63,20 +63,39 @@ namespace Backend.Controllers
             };
 
             _context.Users.Add(user);
-            await _context.SaveChangesAsync();
 
+            var log = new AuditLog
+            {
+                TableName = "User",
+                Action = "INSERT",
+                ChangedBy = User.FindFirst(ClaimTypes.Email).Value,
+                ChangedAt = DateTime.Now,
+                Data = JsonConvert.SerializeObject(user)
+            };
+            _context.AuditLogs.Add(log);
+            await _context.SaveChangesAsync();
             return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
         }
 
-        // PUT: api/users/5
         [HttpPut("{id}")]
         [Authorize(Roles = "Admin")]
         public async Task<IActionResult> UpdateUser(int id, UserCreateUpdateDto dto)
         {
             var user = await _context.Users.FindAsync(id);
-
             if (user == null) return NotFound();
 
+            bool hasChanges =
+                user.Email != dto.Email ||
+                user.Role != dto.Role ||
+                user.IsActive != dto.IsActive;
+
+            if (!hasChanges)
+                return NoContent();
+
+            if (user.Email != dto.Email && await _context.Users.AnyAsync(u => u.Email == dto.Email))
+                return BadRequest("Email već postoji.");
+
+            // Snimanje prethodne verziju i audit log samo ako ima izmjena
             var previousVersion = new UserVersion
             {
                 UserId = user.Id,
@@ -86,11 +105,10 @@ namespace Backend.Controllers
                 Adress = user.Address,
                 DateOfBirth = user.DateOfBirth,
                 Role = user.Role,
-                IsActive=user.IsActive,
-                ChangedAt = DateTime.UtcNow,
+                IsActive = user.IsActive,
+                ChangedAt = DateTime.Now,
                 ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value
             };
-
             _context.UserVersions.Add(previousVersion);
 
             var log = new AuditLog
@@ -98,13 +116,10 @@ namespace Backend.Controllers
                 TableName = "User",
                 Action = "UPDATE",
                 ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value,
-                ChangedAt = DateTime.UtcNow,
+                ChangedAt = DateTime.Now,
                 Data = JsonConvert.SerializeObject(user)
             };
             _context.AuditLogs.Add(log);
-
-            if (user.Email != dto.Email && await _context.Users.AnyAsync(u => u.Email == dto.Email))
-                return BadRequest("Email već postoji.");
 
             user.Email = dto.Email;
             user.Role = dto.Role;
@@ -121,6 +136,7 @@ namespace Backend.Controllers
             return NoContent();
         }
 
+
         // DELETE: api/users/5
         [HttpDelete("{id}")]
         [Authorize(Roles = "Admin")]
@@ -134,8 +150,8 @@ namespace Backend.Controllers
             {
                 TableName = "User",
                 Action = "DELETE",
-                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value,
-                ChangedAt = DateTime.UtcNow,
+                ChangedBy = User.FindFirst(ClaimTypes.Email).Value,
+                ChangedAt = DateTime.Now,
                 Data = JsonConvert.SerializeObject(user)
             };
             _context.AuditLogs.Add(log);
@@ -144,18 +160,6 @@ namespace Backend.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
-        }
-
-        [HttpGet("user-history/{userId}")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> GetUserHistory(int userId)
-        {
-            var history = await _context.UserVersions
-                   .Where(u => u.UserId == userId)
-                .OrderByDescending(u => u.ChangedAt)
-                .ToListAsync();
-
-            return Ok(history);
         }
 
         [HttpPost("{userId}/revert/{versionId}")]
@@ -179,9 +183,10 @@ namespace Backend.Controllers
                 Adress = version.Adress,
                 DateOfBirth = version.DateOfBirth,
                 Role = version.Role,
+                IsActive= version.IsActive,
                 Email = version.Email,
-                ChangedAt = DateTime.UtcNow,
-                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value
+                ChangedAt = DateTime.Now,
+                ChangedBy = User.FindFirst(ClaimTypes.Email).Value
             };
 
             _context.UserVersions.Add(newVersion);
@@ -190,8 +195,8 @@ namespace Backend.Controllers
             {
                 TableName = "User",
                 Action = "REVERT",
-                ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value,
-                ChangedAt = DateTime.UtcNow,
+                ChangedBy = User.FindFirst(ClaimTypes.Email).Value,
+                ChangedAt = DateTime.Now,
                 Data = JsonConvert.SerializeObject(version)
             };
             _context.AuditLogs.Add(log);
@@ -201,26 +206,14 @@ namespace Backend.Controllers
             user.LastName = version.LastName;
             user.Address = version.Adress;
             user.Role=version.Role;
+            user.IsActive = version.IsActive;
             user.DateOfBirth = version.DateOfBirth;
 
             await _context.SaveChangesAsync();
             return Ok();
         }
 
-        // PATCH: api/users/5/status
-        [HttpPatch("{id}/status")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> ToggleStatus(int id)
-        {
-            var user = await _context.Users.FindAsync(id);
-            if (user == null) return NotFound();
-
-            user.IsActive = !user.IsActive;
-            await _context.SaveChangesAsync();
-
-            return Ok(new { user.Id, user.IsActive });
-        }
-
+    
         // GET: api/users/profile
         [HttpGet("profile")]
         public async Task<ActionResult<UpdateProfileDto>> GetProfile()
@@ -250,6 +243,16 @@ namespace Backend.Controllers
             var userId = User.GetUserId();
             var user = await _context.Users.FindAsync(userId);
 
+            bool hasChanges =
+            user.Email != dto.Email ||
+            user.FirstName != dto.FirstName ||
+            user.LastName != dto.LastName ||
+            user.Address != dto.Address ||
+            user.DateOfBirth != dto.DateOfBirth;
+
+            if (!hasChanges)
+                return NoContent();
+
             if (user == null)
                 return NotFound("Korisnik nije pronađen.");
 
@@ -265,9 +268,10 @@ namespace Backend.Controllers
                 Adress = user.Address,
                 DateOfBirth = user.DateOfBirth,
                 Role = user.Role,
+                IsActive = user.IsActive,
                 ChangedAt = DateTime.UtcNow,
                 ChangedBy = User.FindFirst(ClaimTypes.Email)?.Value
-            };
+            }; 
 
             _context.UserVersions.Add(previousVersion);
 
@@ -291,6 +295,7 @@ namespace Backend.Controllers
             await _context.SaveChangesAsync();
             return Ok("Profil uspješno ažuriran.");
         }
+
 
         // GET: api/users/statistics
         [HttpGet("statistics")]
@@ -332,15 +337,59 @@ namespace Backend.Controllers
 
         }
 
-        [HttpGet("audit-logs")]
+        [HttpGet("user-history/{userId}")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> GetAuditLogs()
+        public async Task<IActionResult> GetUserHistory(int userId, [FromQuery] int page = 1)
         {
-            var logs = await _context.AuditLogs
-                .OrderByDescending(log => log.ChangedAt)
+            var totalCount = await _context.UserVersions
+                .Where(u => u.UserId == userId)
+                .CountAsync();
+
+            var history = await _context.UserVersions
+                .Where(u => u.UserId == userId)
+                .OrderByDescending(u => u.ChangedAt)
+                .Skip((page - 1) * 5)
+                .Take(5)
                 .ToListAsync();
 
-            return Ok(logs);
+            var result = new
+            {
+                TotalCount = totalCount,
+                CurrentPage = page,
+                PageSize = 5,
+                TotalPages = (int)Math.Ceiling((double)totalCount / 5),
+                History = history
+            };
+
+            return Ok(result);
+        }
+
+        [HttpGet("audit-logs")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> GetAuditLogs([FromQuery] int page = 1)
+        {
+            const int pageSize = 7;
+
+            if (page < 1)
+            {
+                return BadRequest("Stranica mora biti 1 najmanje.");
+            }
+
+            var totalLogs = await _context.AuditLogs.CountAsync();
+
+            var logs = await _context.AuditLogs
+                .OrderByDescending(log => log.ChangedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return Ok(new
+            {
+                TotalCount = totalLogs,
+                Page = page,
+                PageSize = pageSize,
+                Logs = logs
+            });
         }
     }
 }
